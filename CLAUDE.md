@@ -27,29 +27,30 @@ The app follows a unidirectional data flow pattern: **Event → Action → Handl
 
 ### Data Flow
 
-1. **`event.rs`** — Maps crossterm key events to `Action` variants based on current `AppMode` (Normal, Search, Preview, Confirm, Help, ProjectFilter, ExportChoice)
+1. **`event.rs`** — Maps crossterm key events to `Action` variants based on current `AppMode`. Each mode has its own `map_*_key()` function.
 2. **`action.rs`** — Enum of all possible user actions
-3. **`handler.rs`** — Applies actions to `App` state (the single mutation point)
-4. **`app.rs`** — Central `App` struct holding all application state
+3. **`handler.rs`** — Single `handle_action()` function: the only place that mutates `App` state
+4. **`app.rs`** — Central `App` struct holding all application state, plus data operations (filtering, sorting, deletion)
+
+### Adding a New Feature (Common Pattern)
+
+1. Add variant to `Action` enum in `action.rs`
+2. Add key mapping in the appropriate `map_*_key()` function in `event.rs` (or add a new `AppMode` variant + mapper for a new mode)
+3. Handle the action in `handler.rs::handle_action()`
+4. If new UI is needed, add/modify widgets in `src/ui/`
 
 ### Data Layer (`src/data/`)
 
 - **`scanner.rs`** — Scans `~/.claude/projects/` for sessions. Two strategies:
   - From `sessions-index.json` (preferred, contains metadata)
   - Fallback: parse JSONL files directly to extract cwd, timestamps, message counts
-- **`models.rs`** — Data types: `SessionRow`, `IndexEntry`, `SessionsIndex`, `PreviewLine`, `SortField`, `SortOrder`
+- **`models.rs`** — All data types: `SessionRow`, `IndexEntry`, `SessionsIndex`, `PreviewLine`, `SortField`, `SortOrder`
 - **`session.rs`** — Loads conversation preview from JSONL files (lazy, capped at N messages)
 - **`export.rs`** — Exports sessions to Markdown or JSON format
 
 ### UI Layer (`src/ui/`)
 
-- **`layout.rs`** — Top-level layout: search bar → session table → preview panel → status bar
-- **`session_list.rs`** — Main session table widget
-- **`preview.rs`** — Conversation preview panel (User/Assistant/System messages)
-- **`search_bar.rs`** — Search input with sort indicator
-- **`status_bar.rs`** — Bottom bar showing session count, disk usage, status messages
-- **`popup.rs`** — Modal dialogs (confirm, help, project filter, export choice)
-- **`theme.rs`** — Color scheme constants
+Layout is composed top-to-bottom: search bar → session table → preview panel → status bar. Each has its own module. `popup.rs` handles all modal dialogs (confirm, help, project filter, export choice). `theme.rs` defines color constants.
 
 ### Key Design Decisions
 
@@ -57,3 +58,9 @@ The app follows a unidirectional data flow pattern: **Event → Action → Handl
 - Preview is lazily loaded and cached by session ID (`preview_session_id`)
 - Session resume works by setting `should_resume`, breaking the inner loop, spawning `claude -r`, then re-entering the TUI
 - Deletion removes JSONL file, session directory, transcript files, and updates `sessions-index.json`
+- Marked sessions track indices into `all_sessions` (not `filtered_indices`), and indices are adjusted on deletion
+
+## Conventions
+
+- Code comments are in Chinese (简体中文)
+- No `clippy` or `rustfmt` config — use Rust defaults

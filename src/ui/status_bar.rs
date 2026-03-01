@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, AppMode};
 use crate::ui::theme;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
@@ -7,7 +7,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let chunks = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+    let chunks = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
 
     // 左侧：统计信息
@@ -53,13 +53,23 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     f.render_widget(left, chunks[0]);
 
-    // 右侧：快捷键提示
-    let right = Paragraph::new(Line::from(vec![
-        Span::styled(
-            "q:Quit │ /:Search f:Filter │ s:Sort p:Preview │ m:Mark d:Del e:Export │ ?:Help ",
-            Style::default().fg(theme::DIM_FG),
-        ),
-    ]))
+    // 右侧：根据当前模式显示快捷键提示
+    let hints = match &app.mode {
+        AppMode::Normal => {
+            "j/k ↕:Move g/G:Top/End PgUp/Dn │ /:Search f:Filter s/S:Sort │ Enter/r:Resume m:Mark d/D:Del e:Export p:Preview Tab:Focus │ ?:Help q:Quit "
+        }
+        AppMode::Search => "Type to search │ Esc/Enter:Done Ctrl+U:Clear ",
+        AppMode::Preview => "j/k ↕:Scroll │ Tab/Esc:Back q:Quit ",
+        AppMode::Confirm(_) => "y/Enter:Confirm n/Esc:Cancel ",
+        AppMode::Help => "Esc/q/?:Close ",
+        AppMode::ProjectFilter => "j/k ↕:Move Enter:Select Esc:Close ",
+        AppMode::ExportChoice => "m/1:Markdown j/2:JSON Esc:Cancel ",
+    };
+
+    let right = Paragraph::new(Line::from(Span::styled(
+        hints,
+        Style::default().fg(theme::DIM_FG),
+    )))
     .style(Style::default().bg(theme::STATUS_BG))
     .alignment(ratatui::layout::Alignment::Right);
 

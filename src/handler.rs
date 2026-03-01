@@ -219,11 +219,15 @@ pub fn handle_action(app: &mut App, action: Action) {
         }
 
         Action::ScrollPreviewUp => {
-            app.preview_scroll = app.preview_scroll.saturating_sub(1);
+            if !app.preview_lines.is_empty() {
+                app.preview_scroll = app.preview_scroll.saturating_sub(1);
+            }
         }
 
         Action::ScrollPreviewDown => {
-            app.preview_scroll = app.preview_scroll.saturating_add(1);
+            if !app.preview_lines.is_empty() {
+                app.preview_scroll = app.preview_scroll.saturating_add(1);
+            }
         }
 
         Action::ShowHelp => {

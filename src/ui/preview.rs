@@ -3,10 +3,11 @@ use crate::data::models::PreviewLine;
 use crate::ui::theme;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthChar;
 
-pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+pub fn render(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let is_focused = matches!(app.mode, AppMode::Preview);
 
     let border_style = if is_focused {
@@ -27,6 +28,8 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .title(Span::styled(title, Style::default().fg(theme::HEADER_FG)));
 
     if app.preview_lines.is_empty() {
+        // 预览为空时不要保留历史滚动位置，避免出现“可持续滚动但内容空白”
+        app.preview_scroll = 0;
         let empty = Paragraph::new("No preview available")
             .style(theme::dim_style())
             .block(block);
@@ -52,7 +55,7 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let mut meta_spans = vec![
             Span::styled(" Session: ", Style::default().fg(theme::DIM_FG)),
             Span::styled(
-                &session.session_id[..8.min(session.session_id.len())],
+                session.session_id[..8.min(session.session_id.len())].to_string(),
                 Style::default().fg(theme::DIM_FG),
             ),
         ];
@@ -74,37 +77,39 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         )));
     }
 
+    let content_width = area.width.saturating_sub(2) as usize; // 减去左右边框
+
     for preview_line in &app.preview_lines {
         match preview_line {
             PreviewLine::User(text) => {
+                let prefix = "User: ";
+                let max_w = content_width.saturating_sub(prefix.len());
                 lines.push(Line::from(vec![
-                    Span::styled("User: ", Style::default().fg(theme::USER_FG)),
+                    Span::styled(prefix, Style::default().fg(theme::USER_FG)),
                     Span::styled(
-                        clean_text(text),
+                        truncate_to_width(text, max_w),
                         Style::default().fg(theme::USER_FG),
                     ),
                 ]));
             }
             PreviewLine::Assistant(text) => {
+                let prefix = "Assistant: ";
+                let max_w = content_width.saturating_sub(prefix.len());
                 lines.push(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(theme::ASSISTANT_FG)),
                     Span::styled(
-                        "Assistant: ",
-                        Style::default().fg(theme::ASSISTANT_FG),
-                    ),
-                    Span::styled(
-                        clean_text(text),
+                        truncate_to_width(text, max_w),
                         Style::default().fg(theme::ASSISTANT_FG),
                     ),
                 ]));
             }
             PreviewLine::System(text) => {
+                let prefix = "System: ";
+                let max_w = content_width.saturating_sub(prefix.len());
                 lines.push(Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(theme::SYSTEM_FG)),
                     Span::styled(
-                        "System: ",
-                        Style::default().fg(theme::SYSTEM_FG),
-                    ),
-                    Span::styled(
-                        clean_text(text),
+                        truncate_to_width(text, max_w),
                         Style::default().fg(theme::SYSTEM_FG),
                     ),
                 ]));
@@ -120,25 +125,36 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         lines.push(Line::from(""));
     }
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: true })
-        .scroll((app.preview_scroll, 0));
+    // 手动分页，彻底避免 Paragraph::scroll 的越界问题
+    let visible_height = area.height.saturating_sub(2) as usize; // 减去上下边框
+    let max_scroll = lines.len().saturating_sub(visible_height);
+    let scroll = (app.preview_scroll as usize).min(max_scroll);
+    app.preview_scroll = scroll as u16;
+
+    let visible_lines: Vec<Line> = lines.into_iter().skip(scroll).take(visible_height).collect();
+
+    let paragraph = Paragraph::new(visible_lines).block(block);
 
     f.render_widget(paragraph, area);
 }
 
-/// 清理文本中的换行符
-fn clean_text(text: &str) -> String {
-    let cleaned: String = text
-        .chars()
-        .map(|c| if c == '\n' { ' ' } else { c })
-        .collect();
-    // 截断到合理长度
-    if cleaned.len() > 300 {
-        let truncated: String = cleaned.chars().take(300).collect();
-        format!("{}...", truncated)
-    } else {
-        cleaned
+/// 清理文本并按显示宽度截断，确保不超过一行
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    let mut width = 0;
+    let mut result = String::new();
+    for c in text.chars() {
+        if c == '\n' {
+            result.push(' ');
+            width += 1;
+        } else {
+            let cw = c.width().unwrap_or(0);
+            if width + cw > max_width.saturating_sub(3) {
+                result.push_str("...");
+                return result;
+            }
+            result.push(c);
+            width += cw;
+        }
     }
+    result
 }

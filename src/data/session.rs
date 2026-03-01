@@ -13,13 +13,7 @@ pub fn load_preview(path: &Path, max_lines: usize) -> Vec<PreviewLine> {
     let reader = BufReader::new(file);
     let mut lines = Vec::new();
 
-    let mut truncated = false;
     for line in reader.lines() {
-        if lines.len() >= max_lines {
-            truncated = true;
-            break;
-        }
-
         let line = match line {
             Ok(l) => l,
             Err(_) => continue,
@@ -67,8 +61,10 @@ pub fn load_preview(path: &Path, max_lines: usize) -> Vec<PreviewLine> {
         }
     }
 
-    if truncated {
-        lines.push(PreviewLine::Truncated);
+    // 保留最后 max_lines 条消息，优先显示最近的对话
+    if lines.len() > max_lines {
+        lines = lines.split_off(lines.len() - max_lines);
+        lines.insert(0, PreviewLine::Truncated);
     }
 
     lines
