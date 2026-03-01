@@ -109,6 +109,12 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     ),
                 ]));
             }
+            PreviewLine::Truncated => {
+                lines.push(Line::from(Span::styled(
+                    "[...truncated]",
+                    Style::default().fg(theme::DIM_FG),
+                )));
+            }
         }
         // 对话之间空一行
         lines.push(Line::from(""));

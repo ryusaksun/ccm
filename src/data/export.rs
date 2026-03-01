@@ -41,6 +41,9 @@ pub fn export_markdown(session: &SessionRow, output_path: &Path) -> std::io::Res
             PreviewLine::System(text) => {
                 content.push_str(&format!("## System\n\n{}\n\n", text));
             }
+            PreviewLine::Truncated => {
+                content.push_str("*[...truncated]*\n\n");
+            }
         }
     }
 

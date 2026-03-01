@@ -22,22 +22,23 @@ fn shorten_path(abs_path: &Path) -> String {
     }
 }
 
-/// 扫描所有项目目录，返回所有会话
-pub fn scan_all_sessions() -> Vec<SessionRow> {
+/// 扫描所有项目目录，返回所有会话和总磁盘占用
+pub fn scan_all_sessions() -> (Vec<SessionRow>, u64) {
     let claude_dir = match dirs::home_dir() {
         Some(h) => h.join(".claude").join("projects"),
-        None => return Vec::new(),
+        None => return (Vec::new(), 0),
     };
 
     if !claude_dir.exists() {
-        return Vec::new();
+        return (Vec::new(), 0);
     }
 
     let mut sessions = Vec::new();
+    let mut total_size = 0u64;
 
     let entries = match fs::read_dir(&claude_dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(_) => return (Vec::new(), 0),
     };
 
     for entry in entries.flatten() {
@@ -45,6 +46,9 @@ pub fn scan_all_sessions() -> Vec<SessionRow> {
         if !path.is_dir() {
             continue;
         }
+
+        // 累计目录大小
+        total_size += dir_size(&path);
 
         let index_path = path.join("sessions-index.json");
 
@@ -63,7 +67,7 @@ pub fn scan_all_sessions() -> Vec<SessionRow> {
 
     // 按 modified 降序排序
     sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
-    sessions
+    (sessions, total_size)
 }
 
 /// 从 sessions-index.json 读取会话列表
@@ -76,7 +80,6 @@ fn scan_from_index(
 
     // 从索引获取真实项目路径
     let original_path = PathBuf::from(&index.original_path);
-    let project_name = shorten_path(&original_path);
 
     let rows: Vec<SessionRow> = index
         .entries
@@ -236,9 +239,8 @@ fn scan_single_jsonl(
     }
 
     // 截断 firstPrompt
-    if first_prompt.len() > 200 {
-        let truncated: String = first_prompt.chars().take(200).collect();
-        first_prompt = format!("{}...", truncated);
+    if first_prompt.chars().count() > 200 {
+        first_prompt = format!("{}...", first_prompt.chars().take(200).collect::<String>());
     }
 
     let created = first_timestamp
@@ -292,15 +294,6 @@ fn extract_message_text(parsed: &serde_json::Value) -> String {
         }
     }
     String::new()
-}
-
-/// 计算 ~/.claude/projects 目录的总大小
-pub fn calculate_total_size() -> u64 {
-    let claude_dir = match dirs::home_dir() {
-        Some(h) => h.join(".claude").join("projects"),
-        None => return 0,
-    };
-    dir_size(&claude_dir)
 }
 
 fn dir_size(path: &Path) -> u64 {

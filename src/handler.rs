@@ -93,7 +93,7 @@ pub fn handle_action(app: &mut App, action: Action) {
                         app.selected_project = Some(selected - 1);
                     }
                     app.mode = AppMode::Normal;
-                    app.apply_filter();
+                    app.apply_filter(true);
                 }
                 AppMode::Normal => {
                     if let Some(session) = app.selected_session() {
@@ -116,27 +116,27 @@ pub fn handle_action(app: &mut App, action: Action) {
 
         Action::SearchInput(c) => {
             app.search_text.push(c);
-            app.apply_filter();
+            app.apply_filter(false);
         }
 
         Action::SearchBackspace => {
             app.search_text.pop();
-            app.apply_filter();
+            app.apply_filter(false);
         }
 
         Action::SearchClear => {
             app.search_text.clear();
-            app.apply_filter();
+            app.apply_filter(false);
         }
 
         Action::CycleSortField => {
             app.sort_field = app.sort_field.next();
-            app.apply_filter();
+            app.apply_filter(true);
         }
 
         Action::ToggleSortOrder => {
             app.sort_order = app.sort_order.toggle();
-            app.apply_filter();
+            app.apply_filter(true);
         }
 
         Action::ToggleProjectFilter => {

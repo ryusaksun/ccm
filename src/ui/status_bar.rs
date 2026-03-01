@@ -56,7 +56,7 @@ pub fn render(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // 右侧：快捷键提示
     let right = Paragraph::new(Line::from(vec![
         Span::styled(
-            "q:Quit /:Search r:Resume d:Delete e:Export ?:Help ",
+            "q:Quit │ /:Search f:Filter │ s:Sort p:Preview │ m:Mark d:Del e:Export │ ?:Help ",
             Style::default().fg(theme::DIM_FG),
         ),
     ]))

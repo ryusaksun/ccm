@@ -65,6 +65,7 @@ pub enum PreviewLine {
     User(String),
     Assistant(String),
     System(String),
+    Truncated,
 }
 
 /// 排序字段

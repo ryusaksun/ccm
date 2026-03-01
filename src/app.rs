@@ -75,8 +75,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let all_sessions = scanner::scan_all_sessions();
-        let total_disk_usage = scanner::calculate_total_size();
+        let (all_sessions, total_disk_usage) = scanner::scan_all_sessions();
 
         // 收集所有项目名
         let mut projects: Vec<String> = all_sessions
@@ -111,6 +110,7 @@ impl App {
             status_message: None,
         };
 
+        app.apply_filter(true);
         if !app.filtered_indices.is_empty() {
             app.table_state.select(Some(0));
             app.load_preview_for_selected();
@@ -135,7 +135,7 @@ impl App {
     }
 
     /// 应用搜索和过滤
-    pub fn apply_filter(&mut self) {
+    pub fn apply_filter(&mut self, needs_sort: bool) {
         let search_lower = self.search_text.to_lowercase();
         let project_filter = self
             .selected_project
@@ -171,8 +171,10 @@ impl App {
             .map(|(i, _)| i)
             .collect();
 
-        // 排序
-        self.sort_indices(&mut indices);
+        // 仅在排序条件变化时重新排序
+        if needs_sort {
+            self.sort_indices(&mut indices);
+        }
 
         self.filtered_indices = indices;
 
@@ -237,15 +239,21 @@ impl App {
         {
             let session = &self.all_sessions[pos];
 
+            let mut errors = Vec::new();
+
             // 删除 JSONL 文件
-            let _ = std::fs::remove_file(&session.jsonl_path);
+            if let Err(e) = std::fs::remove_file(&session.jsonl_path) {
+                errors.push(format!("JSONL: {}", e));
+            }
 
             // 删除可能存在的同名目录
             let dir = session
                 .project_dir
                 .join(&session.session_id);
             if dir.exists() {
-                let _ = std::fs::remove_dir_all(&dir);
+                if let Err(e) = std::fs::remove_dir_all(&dir) {
+                    errors.push(format!("dir: {}", e));
+                }
             }
 
             // 更新 sessions-index.json（如果存在）
@@ -267,15 +275,32 @@ impl App {
                 }
             }
 
-            // 从内存中移除
+            // 从内存中移除，保留其他标记
+            self.marked_sessions.remove(&pos);
             self.all_sessions.remove(pos);
-            self.marked_sessions.clear();
-            self.apply_filter();
+            // 调整剩余标记的索引（remove 导致后续索引偏移）
+            self.marked_sessions = self
+                .marked_sessions
+                .iter()
+                .map(|&idx| if idx > pos { idx - 1 } else { idx })
+                .collect();
+            self.apply_filter(true);
 
-            self.status_message = Some(StatusMessage {
-                text: format!("Deleted session {}", &session_id[..8]),
-                is_error: false,
-            });
+            if errors.is_empty() {
+                self.status_message = Some(StatusMessage {
+                    text: format!("Deleted session {}", &session_id[..8]),
+                    is_error: false,
+                });
+            } else {
+                self.status_message = Some(StatusMessage {
+                    text: format!(
+                        "Deleted {} (warnings: {})",
+                        &session_id[..8],
+                        errors.join(", ")
+                    ),
+                    is_error: true,
+                });
+            }
         }
     }
 

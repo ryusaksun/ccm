@@ -1,8 +1,6 @@
 mod action;
 mod app;
-mod config;
 mod data;
-mod error;
 mod event;
 mod handler;
 mod ui;
@@ -74,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             terminal.draw(|f| ui::layout::render(f, &mut app))?;
 
-            if crossterm_event::poll(Duration::from_millis(250))? {
+            if crossterm_event::poll(Duration::from_millis(100))? {
                 let event = crossterm_event::read()?;
                 if let Some(action) = event::map_event(&app.mode, event) {
                     handler::handle_action(&mut app, action);

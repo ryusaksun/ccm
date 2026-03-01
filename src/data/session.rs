@@ -13,8 +13,10 @@ pub fn load_preview(path: &Path, max_lines: usize) -> Vec<PreviewLine> {
     let reader = BufReader::new(file);
     let mut lines = Vec::new();
 
+    let mut truncated = false;
     for line in reader.lines() {
         if lines.len() >= max_lines {
+            truncated = true;
             break;
         }
 
@@ -65,6 +67,10 @@ pub fn load_preview(path: &Path, max_lines: usize) -> Vec<PreviewLine> {
         }
     }
 
+    if truncated {
+        lines.push(PreviewLine::Truncated);
+    }
+
     lines
 }
 
@@ -92,10 +98,8 @@ fn extract_content(parsed: &serde_json::Value) -> String {
 }
 
 fn truncate_text(text: &str, max_chars: usize) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() > max_chars {
-        let truncated: String = chars[..max_chars].iter().collect();
-        format!("{}...", truncated)
+    if text.chars().count() > max_chars {
+        format!("{}...", text.chars().take(max_chars).collect::<String>())
     } else {
         text.to_string()
     }
