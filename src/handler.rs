@@ -246,11 +246,7 @@ pub fn handle_action(app: &mut App, action: Action) {
                     app.mode = AppMode::Normal;
                 }
                 AppMode::Confirm(ConfirmAction::BulkDelete(ids)) => {
-                    let count = ids.len();
-                    for sid in ids {
-                        app.delete_session(&sid);
-                    }
-                    app.set_status(format!("Deleted {} sessions", count), false);
+                    app.delete_sessions_bulk(&ids);
                     app.mode = AppMode::Normal;
                 }
                 AppMode::Confirm(ConfirmAction::ResumeSession(sid, path)) => {

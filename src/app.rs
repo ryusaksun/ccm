@@ -230,77 +230,95 @@ impl App {
         }
     }
 
-    /// 删除会话
-    pub fn delete_session(&mut self, session_id: &str) {
-        if let Some(pos) = self
+    /// 删除会话（删除文件 + 从内存移除，但不调用 apply_filter）
+    /// 返回是否有警告
+    fn delete_session_inner(&mut self, session_id: &str) -> Option<bool> {
+        let pos = self
             .all_sessions
             .iter()
-            .position(|s| s.session_id == session_id)
-        {
-            let session = &self.all_sessions[pos];
+            .position(|s| s.session_id == session_id)?;
 
-            let mut errors = Vec::new();
+        let session = &self.all_sessions[pos];
+        let mut has_error = false;
 
-            // 删除 JSONL 文件
-            if let Err(e) = std::fs::remove_file(&session.jsonl_path) {
-                errors.push(format!("JSONL: {}", e));
+        // 删除 JSONL 文件
+        if let Err(_) = std::fs::remove_file(&session.jsonl_path) {
+            has_error = true;
+        }
+
+        // 删除可能存在的同名目录
+        let dir = session.project_dir.join(&session.session_id);
+        if dir.exists() {
+            if let Err(_) = std::fs::remove_dir_all(&dir) {
+                has_error = true;
             }
+        }
 
-            // 删除可能存在的同名目录
-            let dir = session
-                .project_dir
-                .join(&session.session_id);
-            if dir.exists() {
-                if let Err(e) = std::fs::remove_dir_all(&dir) {
-                    errors.push(format!("dir: {}", e));
-                }
-            }
+        // 更新 sessions-index.json（如果存在）
+        let index_path = session.project_dir.join("sessions-index.json");
+        if index_path.exists() {
+            self.remove_from_index(&index_path, session_id);
+        }
 
-            // 更新 sessions-index.json（如果存在）
-            let index_path = session.project_dir.join("sessions-index.json");
-            if index_path.exists() {
-                self.remove_from_index(&index_path, session_id);
-            }
-
-            // 删除对应的 transcript（如果存在）
-            if let Some(home) = dirs::home_dir() {
-                let transcripts_dir = home.join(".claude").join("transcripts");
-                if let Ok(entries) = std::fs::read_dir(&transcripts_dir) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.contains(session_id) {
-                            let _ = std::fs::remove_file(entry.path());
-                        }
+        // 删除对应的 transcript（如果存在）
+        if let Some(home) = dirs::home_dir() {
+            let transcripts_dir = home.join(".claude").join("transcripts");
+            if let Ok(entries) = std::fs::read_dir(&transcripts_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.contains(session_id) {
+                        let _ = std::fs::remove_file(entry.path());
                     }
                 }
             }
+        }
 
-            // 从内存中移除，保留其他标记
-            self.marked_sessions.remove(&pos);
-            self.all_sessions.remove(pos);
-            // 调整剩余标记的索引（remove 导致后续索引偏移）
-            self.marked_sessions = self
-                .marked_sessions
-                .iter()
-                .map(|&idx| if idx > pos { idx - 1 } else { idx })
-                .collect();
-            self.apply_filter(true);
+        // 从内存中移除
+        self.marked_sessions.remove(&pos);
+        self.all_sessions.remove(pos);
+        // 调整剩余标记的索引（remove 导致后续索引偏移）
+        self.marked_sessions = self
+            .marked_sessions
+            .iter()
+            .map(|&idx| if idx > pos { idx - 1 } else { idx })
+            .collect();
 
-            if errors.is_empty() {
-                self.status_message = Some(StatusMessage {
-                    text: format!("Deleted session {}", &session_id[..8]),
-                    is_error: false,
-                });
-            } else {
-                self.status_message = Some(StatusMessage {
-                    text: format!(
-                        "Deleted {} (warnings: {})",
-                        &session_id[..8],
-                        errors.join(", ")
-                    ),
-                    is_error: true,
-                });
+        Some(has_error)
+    }
+
+    /// 删除单个会话
+    pub fn delete_session(&mut self, session_id: &str) {
+        let sid_short = session_id[..8.min(session_id.len())].to_string();
+        match self.delete_session_inner(session_id) {
+            Some(false) => {
+                self.apply_filter(true);
+                self.set_status(format!("Deleted session {}", sid_short), false);
             }
+            Some(true) => {
+                self.apply_filter(true);
+                self.set_status(format!("Deleted {} (with warnings)", sid_short), true);
+            }
+            None => {}
+        }
+    }
+
+    /// 批量删除会话
+    pub fn delete_sessions_bulk(&mut self, session_ids: &[String]) {
+        let mut deleted = 0;
+        let mut has_errors = false;
+        for sid in session_ids {
+            if let Some(err) = self.delete_session_inner(sid) {
+                deleted += 1;
+                if err {
+                    has_errors = true;
+                }
+            }
+        }
+        self.apply_filter(true);
+        if has_errors {
+            self.set_status(format!("Deleted {} sessions (with warnings)", deleted), true);
+        } else {
+            self.set_status(format!("Deleted {} sessions", deleted), false);
         }
     }
 

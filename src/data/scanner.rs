@@ -1,5 +1,6 @@
 use crate::data::models::{IndexEntry, SessionRow, SessionsIndex};
 use chrono::DateTime;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -52,16 +53,21 @@ pub fn scan_all_sessions() -> (Vec<SessionRow>, u64) {
 
         let index_path = path.join("sessions-index.json");
 
+        // 收集已索引的 session ID，用于补充扫描时跳过
+        let mut indexed_ids = HashSet::new();
+
         if index_path.exists() {
-            // 有索引文件：从 originalPath 获取真实路径
             if let Some(mut indexed) = scan_from_index(&index_path, &path) {
+                for row in &indexed {
+                    indexed_ids.insert(row.session_id.clone());
+                }
                 sessions.append(&mut indexed);
             }
-        } else {
-            // 没有索引文件：扫描 JSONL，从 cwd 字段获取真实路径
-            if let Some(mut scanned) = scan_from_jsonl_files(&path) {
-                sessions.append(&mut scanned);
-            }
+        }
+
+        // 补充扫描未被索引覆盖的 JSONL 文件（传入 indexed_ids 直接跳过，避免无谓解析）
+        if let Some(mut extra) = scan_from_jsonl_files(&path, &indexed_ids) {
+            sessions.append(&mut extra);
         }
     }
 
@@ -78,8 +84,12 @@ fn scan_from_index(
     let content = fs::read_to_string(index_path).ok()?;
     let index: SessionsIndex = serde_json::from_str(&content).ok()?;
 
-    // 从索引获取真实项目路径
-    let original_path = PathBuf::from(&index.original_path);
+    // 从索引获取真实项目路径（为空时回退到项目目录本身）
+    let original_path = if index.original_path.is_empty() {
+        project_dir.to_path_buf()
+    } else {
+        PathBuf::from(&index.original_path)
+    };
 
     let rows: Vec<SessionRow> = index
         .entries
@@ -133,9 +143,10 @@ fn index_entry_to_row(
     })
 }
 
-/// 从 JSONL 文件直接扫描会话元数据
+/// 从 JSONL 文件直接扫描会话元数据，跳过 skip_ids 中已有的会话
 fn scan_from_jsonl_files(
     project_dir: &Path,
+    skip_ids: &HashSet<String>,
 ) -> Option<Vec<SessionRow>> {
     let entries = fs::read_dir(project_dir).ok()?;
     let mut rows = Vec::new();
@@ -157,6 +168,11 @@ fn scan_from_jsonl_files(
             continue;
         }
 
+        // 跳过已被索引覆盖的会话
+        if skip_ids.contains(&session_id) {
+            continue;
+        }
+
         if let Some(row) = scan_single_jsonl(&path, &session_id, project_dir) {
             rows.push(row);
         }
@@ -164,6 +180,10 @@ fn scan_from_jsonl_files(
 
     Some(rows)
 }
+
+/// 超长行截断阈值：超过此长度的行只解析前 HEAD_BYTES 字节提取元数据
+const LONG_LINE_THRESHOLD: usize = 64 * 1024; // 64 KB
+const HEAD_BYTES: usize = 4 * 1024; // 4 KB（足够提取顶层字段）
 
 /// 从单个 JSONL 文件提取元数据
 fn scan_single_jsonl(
@@ -188,9 +208,18 @@ fn scan_single_jsonl(
             Err(_) => continue,
         };
 
-        let parsed: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
+        // 超长行：只截取开头部分解析顶层字段，避免内存暴涨
+        let parsed: serde_json::Value = if line.len() > LONG_LINE_THRESHOLD {
+            // 截取前 HEAD_BYTES 做轻量解析（不一定是合法 JSON，但能提取顶层字段）
+            match parse_head_fields(&line) {
+                Some(v) => v,
+                None => continue,
+            }
+        } else {
+            match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            }
         };
 
         // 提取 cwd（只取第一个）
@@ -223,7 +252,10 @@ fn scan_single_jsonl(
                     {
                         continue;
                     }
-                    first_prompt = extract_message_text(&parsed);
+                    // 超长行无法完整提取消息文本，跳过
+                    if line.len() <= LONG_LINE_THRESHOLD {
+                        first_prompt = extract_message_text(&parsed);
+                    }
                 }
 
                 if git_branch.is_empty() {
@@ -275,6 +307,44 @@ fn scan_single_jsonl(
     })
 }
 
+/// 从超长 JSON 行的开头手动提取顶层字段（type, cwd, timestamp, gitBranch, isMeta）
+fn parse_head_fields(line: &str) -> Option<serde_json::Value> {
+    let head: String = line.chars().take(HEAD_BYTES).collect();
+    let mut map = serde_json::Map::new();
+    for key in &["type", "cwd", "timestamp", "gitBranch", "isMeta"] {
+        let pattern = format!("\"{}\":", key);
+        if let Some(pos) = head.find(&pattern) {
+            let after = &head[pos + pattern.len()..];
+            let after = after.trim_start();
+            if after.starts_with('"') {
+                // 字符串值：查找未转义的闭合引号
+                let bytes = after.as_bytes();
+                let mut i = 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2; // 跳过转义字符
+                    } else if bytes[i] == b'"' {
+                        let val = &after[1..i];
+                        map.insert(key.to_string(), serde_json::Value::String(val.to_string()));
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else if after.starts_with("true") {
+                map.insert(key.to_string(), serde_json::Value::Bool(true));
+            } else if after.starts_with("false") {
+                map.insert(key.to_string(), serde_json::Value::Bool(false));
+            }
+        }
+    }
+    if map.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(map))
+    }
+}
+
 /// 从消息 JSON 中提取文本内容
 fn extract_message_text(parsed: &serde_json::Value) -> String {
     if let Some(msg) = parsed.get("message") {
@@ -296,15 +366,15 @@ fn extract_message_text(parsed: &serde_json::Value) -> String {
     String::new()
 }
 
+/// 统计目录下直接文件的总大小（不递归子目录，避免扫描开销过大）
 fn dir_size(path: &Path) -> u64 {
     let mut total = 0u64;
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                total += dir_size(&p);
-            } else {
-                total += fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    total += meta.len();
+                }
             }
         }
     }
