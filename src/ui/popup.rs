@@ -11,7 +11,10 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
     if let AppMode::Confirm(ref action) = app.mode {
         let message = match action {
             ConfirmAction::DeleteSession(sid) => {
-                format!("Delete session {}...?\n\n(y)es / (n)o", &sid[..8.min(sid.len())])
+                format!(
+                    "Delete session {}...?\n\n(y)es / (n)o",
+                    sid.chars().take(8).collect::<String>()
+                )
             }
             ConfirmAction::BulkDelete(ids) => {
                 format!(
@@ -22,7 +25,7 @@ pub fn render_confirm(f: &mut Frame, app: &App) {
             ConfirmAction::ResumeSession(sid, ref path) => {
                 format!(
                     "Resume session {}...?\nProject: {}\n\n(y)es / (n)o",
-                    &sid[..8.min(sid.len())],
+                    sid.chars().take(8).collect::<String>(),
                     path.display()
                 )
             }

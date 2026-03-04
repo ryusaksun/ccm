@@ -55,7 +55,7 @@ pub fn render(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         let mut meta_spans = vec![
             Span::styled(" Session: ", Style::default().fg(theme::DIM_FG)),
             Span::styled(
-                session.session_id[..8.min(session.session_id.len())].to_string(),
+                session.session_id.chars().take(8).collect::<String>(),
                 Style::default().fg(theme::DIM_FG),
             ),
         ];
